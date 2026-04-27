@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      godot_version:
+        description: 'Godot version (e.g. 4.6.2)'
+        required: false
+        default: '4.6.2'
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from plugin.cfg
+        id: get_version
+        run: |
+          VERSION=$(grep "version=" platforms/godot_editor/addons/healthconnect_plugin/plugin.cfg | sed 's/version="//;s/"//')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Build plugin
+        working-directory: platforms/android
+        run: ./gradlew assembleRelease
+
+      - name: Package release zip
+        run: |
+          mkdir -p package/addons/healthconnect_plugin
+          cp -r platforms/godot_editor/addons/healthconnect_plugin/* package/addons/healthconnect_plugin/
+          
+          cd package
+          zip -r "${{ github.workspace }}/HealthConnectPlugin-${{ steps.get_version.outputs.version }}-godot${{ inputs.godot_version }}.zip" addons
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.get_version.outputs.version }}" \
+            --title "HealthConnectPlugin v${{ steps.get_version.outputs.version }} (Godot ${{ inputs.godot_version }})" \
+            --generate-notes \
+            "HealthConnectPlugin-${{ steps.get_version.outputs.version }}-godot${{ inputs.godot_version }}.zip"

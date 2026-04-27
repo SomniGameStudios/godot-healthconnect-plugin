@@ -1,0 +1,6 @@
+<!-- android/src/main/res/values/strings.xml -->
+<resources>
+    <!-- Replace 0000000000 with your actual Game Services Project ID -->
+    <string translatable="false" name="game_services_project_id">638624408538</string>
+    <string name="permissions_rationale_text">This app uses Health Connect to access and manage your health data, like steps. The data is used for in-game rewards and is not shared with third parties.</string>
+</resources>

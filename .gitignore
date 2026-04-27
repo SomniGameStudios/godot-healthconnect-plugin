@@ -1,0 +1,41 @@
+# Build artifacts
+build/
+bin/
+*.a
+*.aar
+*.jar
+*.apk
+
+# Android/Gradle
+.gradle/
+local.properties
+captures/
+.externalNativeBuild
+.cxx/
+*.keystore
+!debug.keystore
+
+# Xcode
+xcuserdata/
+DerivedData/
+Build/
+
+# Godot source (downloaded by build scripts)
+platforms/ios/godot/
+
+# SCons
+.sconsign.dblite
+*.o
+*.os
+
+# Demo plugin binaries (populated by build)
+platforms/godot_editor/addons/healthconnect_plugin/bin/
+
+# Godot editor
+.godot/
+
+# OS
+.DS_Store
+*~
+.claude/settings.local.json
+/export-ios
