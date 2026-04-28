@@ -1,36 +1,52 @@
 package com.somnigamestudios.healthconnect
 
 import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import android.view.View
-import android.widget.Toast
 import org.godotengine.godot.Godot
 import org.godotengine.godot.plugin.GodotPlugin
 import org.godotengine.godot.plugin.SignalInfo
 import org.godotengine.godot.plugin.UsedByGodot
+import org.json.JSONObject
 
 class HealthConnectPlugin(godot: Godot) : GodotPlugin(godot) {
 
     private val tag = "godot"
     private var permissionsManager: PermissionsManager
-    private var healthConnectManager: HealthConnectManager
     private var stepSensorManager: StepSensorManager
+    private var midnightReceiver: MidnightReceiver
+
+    // Cached values — updated on query completion, just like iOS
+    @Volatile private var cachedTodaySteps: Int = 0
+    @Volatile private var cachedTotalSteps: Int = 0
+    @Volatile private var cachedPeriodSteps: Map<String, Int> = emptyMap()
 
     override fun getPluginName() = "HealthConnectPlugin"
 
-    override fun getPluginSignals(): MutableSet<SignalInfo> {
-        val signals: MutableSet<SignalInfo> = mutableSetOf()
-        signals.add(SignalInfo("connected"))
-        signals.add(SignalInfo("disconnected"))
-        signals.add(SignalInfo("today_steps", Integer::class.java))
+    override fun getPluginSignals(): MutableSet<SignalInfo> = mutableSetOf(
+        // iOS HealthKit parity signals
+        SignalInfo("permission_result", Boolean::class.javaObjectType),
+        SignalInfo("today_steps_ready", Integer::class.java),
+        SignalInfo("total_steps_ready", Integer::class.java),
+        SignalInfo("period_steps_ready", org.godotengine.godot.Dictionary::class.java),
+        SignalInfo("steps_updated", Integer::class.java),
 
-        signals.add(SignalInfo("step_detected"))
-        signals.add(SignalInfo("step_count_updated", Integer::class.java))
+        // Pedometer (CMPedometer equivalent) signals
+        SignalInfo("pedometer_steps_updated", Integer::class.java),
+        SignalInfo("pedometer_error", String::class.java),
 
-        signals.add(SignalInfo("activity_permission_result", Boolean::class.javaObjectType))
-
-        return signals
-    }
+        // Low-level sensor signals (kept for compatibility)
+        SignalInfo("step_detected"),
+        SignalInfo("step_count_updated", Integer::class.java),
+        SignalInfo("connected"),
+        SignalInfo("disconnected"),
+    )
 
     override fun onMainCreate(activity: Activity?): View? {
         Thread.setDefaultUncaughtExceptionHandler { _, exception ->
@@ -48,110 +64,134 @@ class HealthConnectPlugin(godot: Godot) : GodotPlugin(godot) {
     }
 
     init {
-        val activityInstance = activity?: throw IllegalStateException("Activity is null")
+        val activityInstance = activity ?: throw IllegalStateException("Activity is null")
         permissionsManager = PermissionsManager(activityInstance, this, tag)
-        healthConnectManager = HealthConnectManager(activityInstance, permissionsManager, this, tag)
         stepSensorManager = StepSensorManager(activityInstance, this, tag)
-        permissionsManager.initializePermissionLauncher()
-        //StepSnapshotScheduler.schedule(activityInstance)
+        midnightReceiver = MidnightReceiver()
+
+        // Register ACTION_DATE_CHANGED receiver for exact midnight baseline capture
+        val filter = IntentFilter(Intent.ACTION_DATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            activityInstance.registerReceiver(midnightReceiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            activityInstance.registerReceiver(midnightReceiver, filter)
+        }
+
+        // Ensure the stored baseline is for today (handles app launch on a new day)
+        stepSensorManager.ensureBaselineIsCurrentDay()
+    }
+
+    // ---- iOS HealthKit API parity ----
+
+    @UsedByGodot
+    fun requestPermission() {
+        permissionsManager.requestActivityRecognitionPermission()
     }
 
     @UsedByGodot
-    fun checkHealthConnectInstalled(): Boolean {
-        return healthConnectManager.checkHealthConnectInstalled()
+    fun getPermissionStatus(): Int {
+        // Mirror iOS HKAuthorizationStatus: 0=not_determined, 1=denied, 2=authorized
+        return when {
+            permissionsManager.isActivityRecognitionGranted() -> 2
+            else -> 0
+        }
     }
 
     @UsedByGodot
-    fun checkHealthConnectUpdated(): Boolean {
-        return healthConnectManager.checkHealthConnectUpdated()
+    fun isHealthDataAvailable(): Boolean = true
+
+    @UsedByGodot
+    fun openSettings() {
+        val activityInstance = activity ?: return
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", activityInstance.packageName, null)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        activityInstance.startActivity(intent)
     }
 
     @UsedByGodot
-    fun promptHealthConnectInstall() {
-        healthConnectManager.promptHealthConnectInstall()
+    fun runTodayStepsQuery() {
+        val steps = stepSensorManager.getTodaySteps()
+        cachedTodaySteps = steps
+        emitSignal("today_steps_ready", steps)
     }
 
     @UsedByGodot
-    fun promptHealthConnectUpdate() {
-        healthConnectManager.promptHealthConnectUpdate()
+    fun runTotalStepsQuery() {
+        val steps = stepSensorManager.getTotalSteps()
+        cachedTotalSteps = steps
+        emitSignal("total_steps_ready", steps)
     }
 
     @UsedByGodot
-    fun requestHealthConnectPermissions() {
-        healthConnectManager.requestHealthConnectPermissions()
+    fun runPeriodStepsQuery(days: Int) {
+        val periodMap = stepSensorManager.getPeriodStepsDict(days)
+        cachedPeriodSteps = periodMap
+
+        val dict = org.godotengine.godot.Dictionary()
+        for ((k, v) in periodMap) dict[k] = v
+        emitSignal("period_steps_ready", dict)
     }
 
     @UsedByGodot
-    fun arePermissionsGrantedSync(): Boolean {
-        return healthConnectManager.arePermissionsGranted()
+    fun getTodaySteps(): Int = cachedTodaySteps
+
+    @UsedByGodot
+    fun getTotalSteps(): Int = cachedTotalSteps
+
+    @UsedByGodot
+    fun getPeriodStepsDict(): org.godotengine.godot.Dictionary {
+        val dict = org.godotengine.godot.Dictionary()
+        for ((k, v) in cachedPeriodSteps) dict[k] = v
+        return dict
     }
 
-    // Activity recognition permissions are needed for Step Sensors to work
+    // ---- Step observer (HKObserverQuery equivalent) ----
+
+    @UsedByGodot
+    fun startStepObserver() {
+        stepSensorManager.startListening()
+    }
+
+    @UsedByGodot
+    fun stopStepObserver() {
+        stepSensorManager.stopListening()
+    }
+
+    // ---- Pedometer (CMPedometer equivalent) ----
+
+    @UsedByGodot
+    fun isPedometerAvailable(): Boolean = true
+
+    @UsedByGodot
+    fun getPedometerPermissionStatus(): Int = getPermissionStatus()
+
+    @UsedByGodot
+    fun startPedometerObserver() {
+        stepSensorManager.startListening()
+    }
+
+    @UsedByGodot
+    fun stopPedometerObserver() {
+        stepSensorManager.stopListening()
+    }
+
+    @UsedByGodot
+    fun getLivePedometerSteps(): Int = stepSensorManager.getLiveSessionSteps()
+
+    // ---- Permission ----
+
     @UsedByGodot
     fun requestActivityPermission() {
         permissionsManager.requestActivityRecognitionPermission()
     }
 
     @UsedByGodot
-    fun isActivityPermissionGranted(): Boolean {
-        return permissionsManager.isActivityRecognitionGranted()
-    }
+    fun isActivityPermissionGranted(): Boolean = permissionsManager.isActivityRecognitionGranted()
 
-    @UsedByGodot
-    fun getTodaySteps(): Int {
-        return healthConnectManager.getTodaySteps()
-    }
+    // ---- Internal signal bridge (called by StepSensorManager) ----
 
-    @UsedByGodot
-    fun getYesterdaySteps(): Int {
-        return healthConnectManager.getYesterdaySteps()
-    }
-
-    @UsedByGodot
-    fun showToast(msg: String) {
-        runOnUiThread {
-            Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
-            Log.v(tag, "Message from Godot: $msg")
-        }
-    }
-
-    @UsedByGodot
-    fun sendSignal(name: String) {
-        emitSignal(name)
-    }
-    @UsedByGodot
-    fun sendSignal(name: String, param: Any) {
-        emitSignal(name, param)
-    }
-
-    @UsedByGodot
-    fun startStepSensors() {
-        stepSensorManager.startListening()
-    }
-
-    @UsedByGodot
-    fun stopStepSensors() {
-        stepSensorManager.stopListening()
-    }
-
-    @UsedByGodot
-    fun resetStepCounterBaseline() {
-        stepSensorManager.resetBaseline()
-    }
-
-    @UsedByGodot
-    fun getCurrentSteps(): Int {
-        return stepSensorManager.getCurrentSteps()
-    }
-
-    @UsedByGodot
-    fun getStepsSinceLastCheck(): Int {
-        return stepSensorManager.getStepsSinceLastCheck()
-    }
-
-    @UsedByGodot
-    fun getApproxStepsLast24h(): Int {
-        return stepSensorManager.computeApproxStepsLast24h()
-    }
-
+    fun sendSignal(name: String) = emitSignal(name)
+    fun sendSignal(name: String, param: Any) = emitSignal(name, param)
 }

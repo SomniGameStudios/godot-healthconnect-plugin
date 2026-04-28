@@ -44,31 +44,15 @@ android {
 }
 
 dependencies {
-
-    //implementation(libs.androidx.core.ktx)
-    //implementation(libs.androidx.appcompat)
     implementation(libs.material)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
-    //androidTestImplementation(libs.androidx.espresso.core)
 
-    // Godot dependencies
+    // Godot
     implementation("org.godotengine:godot:4.6.2.stable")
 
-    // Common dependencies
+    // Core
     implementation("androidx.appcompat:appcompat:1.7.0")
-
-    // Health Connect dependencies
-    implementation("androidx.health.connect:connect-client:1.1.0-alpha10")
-
-    // Sensor dependencies
-    implementation(platform("androidx.compose:compose-bom:2023.10.01"))
-    implementation("androidx.activity:activity-compose")
-    implementation("androidx.compose.foundation:foundation")
-    implementation("androidx.compose.material:material")
-
-    // WorkManager Dependencies
-    implementation("androidx.work:work-runtime-ktx:2.9.0")
 }
 
 // BUILD TASKS DEFINITION

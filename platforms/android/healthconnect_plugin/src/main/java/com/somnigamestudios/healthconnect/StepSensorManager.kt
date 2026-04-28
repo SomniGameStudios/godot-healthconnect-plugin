@@ -1,6 +1,5 @@
 package com.somnigamestudios.healthconnect
 
-import android.app.Activity
 import android.content.Context
 import android.content.SharedPreferences
 import android.hardware.Sensor
@@ -8,152 +7,224 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.SystemClock
+import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 class StepSensorManager(
-    private val activity: Activity,
-    private val godotAndroidPlugin: HealthConnectPlugin,
-    private val tag: String
+    private val context: Context,
+    private val plugin: HealthConnectPlugin? = null,
+    private val tag: String = "godot"
 ) : SensorEventListener {
 
-    private val sensorManager: SensorManager = activity.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val stepDetector: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
+    private val sensorManager: SensorManager =
+        context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val stepCounter: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+    private val stepDetector: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
 
-    private val prefs: SharedPreferences = activity.getSharedPreferences("step_prefs", Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("step_sensor_prefs", Context.MODE_PRIVATE)
 
-    private var baseline: Int = prefs.getInt("baseline", 0)
-    private var currentSteps: Int = 0
+    // Live session counter (steps taken since startListening() was last called)
+    private var liveSessionSteps: Int = 0
+    private var liveSessionBase: Int = -1
 
-    init {
-        // Detect if the device has rebooted since the last session
-        val lastBootTime = prefs.getLong("boot_time", 0L)
-        val currentBootTime = SystemClock.elapsedRealtime()
+    // ---- Today's steps helpers ----
 
-        if (currentBootTime < lastBootTime) {
-            // Device rebooted, reset baseline
-            baseline = 0
-            prefs.edit().putInt("baseline", baseline).apply()
-        }
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
 
-        // Save the current boot time for next session comparison
-        prefs.edit().putLong("boot_time", currentBootTime).apply()
-    }
+    private fun todayString(): String = dateFormat.format(Date())
 
     fun startListening() {
-        if (stepDetector != null) {
-            sensorManager.registerListener(
-                this,
-                stepDetector,
-                SensorManager.SENSOR_DELAY_NORMAL
-            )
+        stepDetector?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
         }
-        if (stepCounter != null) {
-            sensorManager.registerListener(
-                this,
-                stepCounter,
-                SensorManager.SENSOR_DELAY_NORMAL,
-                0
-            )
+        stepCounter?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL, 0)
         }
-        godotAndroidPlugin.sendSignal("connected")
+        plugin?.sendSignal("connected")
     }
 
     fun stopListening() {
         sensorManager.unregisterListener(this)
-        godotAndroidPlugin.sendSignal("disconnected")
+        plugin?.sendSignal("disconnected")
     }
 
-    fun resetBaseline() {
-        baseline += currentSteps
-        currentSteps = 0
-        prefs.edit().putInt("baseline", baseline).apply()
-    }
-
-    fun getCurrentSteps(): Int = currentSteps
-
-
-    fun getStepsSinceLastCheck(): Int {
-        val delta = currentSteps
-        baseline += delta
-        currentSteps = 0
-        prefs.edit().putInt("baseline", baseline).apply()
-        return delta
-    }
-
-    fun getTotalSteps(): Int {
-        return baseline + currentSteps
-    }
+    // Returns steps counted since startListening() was last called
+    fun getLiveSessionSteps(): Int = liveSessionSteps
 
     override fun onSensorChanged(event: SensorEvent) {
         when (event.sensor.type) {
             Sensor.TYPE_STEP_DETECTOR -> {
-                activity.runOnUiThread {
-                    godotAndroidPlugin.sendSignal("step_detected")
-                }
+                plugin?.sendSignal("pedometer_steps_updated", liveSessionSteps + 1)
+                plugin?.sendSignal("step_detected")
             }
             Sensor.TYPE_STEP_COUNTER -> {
                 val total = event.values[0].toInt()
+                if (liveSessionBase < 0) liveSessionBase = total
+                liveSessionSteps = (total - liveSessionBase).coerceAtLeast(0)
+                plugin?.sendSignal("pedometer_steps_updated", liveSessionSteps)
+                plugin?.sendSignal("step_count_updated", liveSessionSteps)
 
-                if (baseline == 0)
-                    baseline = total
-                else if (total < baseline)
-                    baseline = 0
-
-                currentSteps = total - baseline
-
-                activity.runOnUiThread {godotAndroidPlugin.sendSignal("step_count_updated", currentSteps)}
+                // Keep steps_updated in sync with today's running total
+                val todaySteps = computeTodaySteps(total)
+                plugin?.sendSignal("steps_updated", todaySteps)
             }
         }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
+    // ---- Midnight baseline ----
 
-    // In StepSensorManager.kt (additions)
+    /**
+     * Called by MidnightReceiver at DATE_CHANGED.
+     * Saves yesterday's total into history and sets a new midnight baseline.
+     */
+    fun captureNewDayBaseline() {
+        val now = readCounterNowOnce() ?: return
+        val counterNow = now.second
 
-    private data class Snap(val t: Long, val boot: Long, val total: Int)
+        val storedDate = prefs.getString("midnight_date", "") ?: ""
+        val storedBaseline = prefs.getInt("midnight_baseline", 0)
 
-    private fun bootEpochMillis(): Long {
-        val now = System.currentTimeMillis()
-        val up = android.os.SystemClock.elapsedRealtime()
-        return now - up
-    }
-
-    // --- Simple ring buffer in SharedPreferences (capacity 6 to be safe) ---
-    private val SNAP_CAP = 6 // 4 scheduled + a spare or two
-    private fun addSnapshot(totalSinceBoot: Int) {
-        val p = prefs
-        val size = (p.getInt("ss_size", 0)).coerceIn(0, SNAP_CAP)
-        val idx = p.getInt("ss_head", -1).let { (it + 1 + SNAP_CAP) % SNAP_CAP }
-        val edit = p.edit()
-        edit.putLong("ss_${idx}_t", System.currentTimeMillis())
-        edit.putLong("ss_${idx}_boot", bootEpochMillis())
-        edit.putInt("ss_${idx}_total", totalSinceBoot)
-        edit.putInt("ss_head", idx)
-        edit.putInt("ss_size", if (size < SNAP_CAP) size + 1 else SNAP_CAP)
-        edit.apply()
-    }
-
-    private fun loadRecentSnapshots(): List<Snap> {
-        val p = prefs
-        val size = (p.getInt("ss_size", 0)).coerceIn(0, SNAP_CAP)
-        if (size == 0) return emptyList()
-        val head = p.getInt("ss_head", -1)
-        val out = ArrayList<Snap>(size)
-        for (i in 0 until size) {
-            val idx = (head - i + SNAP_CAP) % SNAP_CAP
-            val t = p.getLong("ss_${idx}_t", 0L)
-            val b = p.getLong("ss_${idx}_boot", 0L)
-            val tot = p.getInt("ss_${idx}_total", -1)
-            if (t > 0 && tot >= 0) out.add(Snap(t, b, tot))
+        // Save yesterday's total to history only if we have a valid stored date
+        if (storedDate.isNotEmpty() && storedDate != todayString()) {
+            val yesterdayTotal = (counterNow - storedBaseline).coerceAtLeast(0)
+            saveToHistory(storedDate, yesterdayTotal)
         }
-        // Return newest-first; caller can reverse if needed
-        return out
+
+        // Set the new midnight baseline
+        prefs.edit()
+            .putInt("midnight_baseline", counterNow)
+            .putString("midnight_date", todayString())
+            .apply()
     }
 
-    // --- Quick one-shot read of TYPE_STEP_COUNTER (no long-lived listener) ---
-    private fun readCounterNowOnce(timeoutMs: Long = 750L): Pair<Long, Int>? {
-        val sm = sensorManager
+    /**
+     * Called on plugin init to handle the case where the device was off over midnight or
+     * the app was first launched on a new day.
+     */
+    fun ensureBaselineIsCurrentDay() {
+        val storedDate = prefs.getString("midnight_date", "") ?: ""
+        if (storedDate == todayString()) return // Already up to date
+
+        val now = readCounterNowOnce() ?: return
+
+        // Check if device has been running since before midnight
+        val bootEpoch = System.currentTimeMillis() - SystemClock.elapsedRealtime()
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val midnightEpoch = cal.timeInMillis
+
+        if (storedDate.isNotEmpty()) {
+            // Save the previous day's total to history
+            val storedBaseline = prefs.getInt("midnight_baseline", 0)
+            if (bootEpoch < midnightEpoch) {
+                // Device was ON over midnight: previous baseline is valid
+                val prevDayTotal = (now.second - storedBaseline).coerceAtLeast(0)
+                saveToHistory(storedDate, prevDayTotal)
+            }
+            // If device rebooted today, we can't recover yesterday's accurate count.
+            // Save what we have (0 or partial) to avoid losing the history entry entirely.
+        }
+
+        // Determine new midnight baseline
+        val newBaseline = if (bootEpoch < midnightEpoch) {
+            // Device was running at midnight: reconstruct baseline via elapsedRealtime is not
+            // possible without the actual sensor reading at midnight.
+            // Best approximation: use the stored counter at midnight (we can't go back in time).
+            // We set 0 here when the device rebooted after midnight since counter starts fresh.
+            now.second // This gives today_steps = 0 until counter grows from now.
+        } else {
+            // Device rebooted today (after midnight): counter started fresh.
+            now.second // today_steps = counter_now - baseline → as steps accumulate it will grow.
+        }
+
+        prefs.edit()
+            .putInt("midnight_baseline", newBaseline)
+            .putString("midnight_date", todayString())
+            .apply()
+    }
+
+    private fun computeTodaySteps(currentCounterValue: Int): Int {
+        val storedDate = prefs.getString("midnight_date", "") ?: ""
+        val storedBaseline = prefs.getInt("midnight_baseline", 0)
+
+        if (storedDate != todayString()) {
+            // Baseline is stale — app open triggered ensureBaselineIsCurrentDay which set a new one,
+            // but it might not have persisted yet. Return 0 as a safe fallback.
+            return 0
+        }
+
+        // If device rebooted today, the counter restarted from 0 and the baseline was set to the
+        // counter reading right after boot (approx 0). As steps accumulate, today_steps grows.
+        return (currentCounterValue - storedBaseline).coerceAtLeast(0)
+    }
+
+    fun getTodaySteps(): Int {
+        val current = readCounterNowOnce()?.second ?: return 0
+        return computeTodaySteps(current)
+    }
+
+    fun getTotalSteps(): Int {
+        val historyTotal = loadAllHistoryTotal()
+        return historyTotal + getTodaySteps()
+    }
+
+    fun getPeriodStepsDict(days: Int): Map<String, Int> {
+        val result = mutableMapOf<String, Int>()
+        val historyJson = prefs.getString("history_json", "{}") ?: "{}"
+        val history = JSONObject(historyJson)
+
+        val cal = Calendar.getInstance()
+        val todayStr = todayString()
+        result[todayStr] = getTodaySteps()
+
+        for (i in 1 until days) {
+            cal.time = Date()
+            cal.add(Calendar.DAY_OF_YEAR, -i)
+            val dateStr = dateFormat.format(cal.time)
+            result[dateStr] = if (history.has(dateStr)) history.getInt(dateStr) else 0
+        }
+
+        return result
+    }
+
+    // ---- Internal helpers ----
+
+    private fun saveToHistory(dateStr: String, steps: Int) {
+        val historyJson = prefs.getString("history_json", "{}") ?: "{}"
+        val obj = JSONObject(historyJson)
+        obj.put(dateStr, steps)
+
+        // Prune entries older than 30 days to avoid unbounded growth
+        val cutoff = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -30) }
+        val cutoffStr = dateFormat.format(cutoff.time)
+        val keys = obj.keys().asSequence().toList()
+        for (key in keys) {
+            if (key < cutoffStr) obj.remove(key)
+        }
+
+        prefs.edit().putString("history_json", obj.toString()).apply()
+    }
+
+    private fun loadAllHistoryTotal(): Int {
+        val historyJson = prefs.getString("history_json", "{}") ?: "{}"
+        val obj = JSONObject(historyJson)
+        var total = 0
+        val keys = obj.keys()
+        while (keys.hasNext()) total += obj.getInt(keys.next())
+        return total
+    }
+
+    fun readCounterNowOnce(timeoutMs: Long = 1000L): Pair<Long, Int>? {
         val sensor = stepCounter ?: return null
         val latch = java.util.concurrent.CountDownLatch(1)
         var captured: Int? = null
@@ -167,47 +238,11 @@ class StepSensorManager(
             }
             override fun onAccuracyChanged(s: Sensor?, a: Int) {}
         }
-        sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+        sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
         try { latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS) }
-        finally { sm.unregisterListener(listener) }
+        finally { sensorManager.unregisterListener(listener) }
 
         val total = captured ?: return null
-        return bootEpochMillis() to total
-    }
-
-    // Call this when you want to snapshot “now” (used by worker & app-open fallback)
-    fun snapshotNow() {
-        val now = readCounterNowOnce() ?: return
-        addSnapshot(now.second)
-    }
-
-    // --- Approx last-24h using last 4 snapshots + “now” ---
-    fun computeApproxStepsLast24h(): Int {
-        val nowPair = readCounterNowOnce() ?: return 0
-        val nowSnap = Snap(System.currentTimeMillis(), nowPair.first, nowPair.second)
-        val snaps = loadRecentSnapshots().toMutableList() // newest-first
-        snaps.add(0, nowSnap) // include “now” as the newest point
-
-        // We only need up to 5 points (now + last 4)
-        val take = snaps.take(5).sortedBy { it.t } // sort by time ascending
-
-        // Sum deltas per contiguous boot segment
-        var sum = 0
-        var segStart: Snap? = null
-        var last: Snap? = null
-        for (s in take) {
-            if (segStart == null) { segStart = s; last = s; continue }
-            if (s.boot != last!!.boot) {
-                // close previous boot segment
-                sum += (last!!.total - segStart.total).coerceAtLeast(0)
-                // start new segment
-                segStart = s
-            }
-            last = s
-        }
-        if (segStart != null && last != null) {
-            sum += (last!!.total - segStart.total).coerceAtLeast(0)
-        }
-        return sum
+        return System.currentTimeMillis() to total
     }
 }

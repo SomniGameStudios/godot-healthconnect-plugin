@@ -1,41 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Step Sensor Permissions -->
+    <!-- Step Sensor Permission -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION"/>
 
-    <!-- Health Connect Permissions -->
-    <uses-permission android:name="android.permission.health.READ_STEPS"/>
     <application>
         <!-- Required Godot Plugin Metadata -->
         <meta-data
             android:name="org.godotengine.plugin.v2.${godotPluginName}"
             android:value="${godotPluginPackageName}.HealthConnectPlugin"/>
 
-        <!-- Rationale activity for permissions (For Android 13 and below) -->
-        <activity
-            android:name=".PermissionsRationaleActivity"
-            android:exported="true">
+        <!-- Fires at exactly midnight when date changes — used for today's step baseline -->
+        <receiver
+            android:name=".MidnightReceiver"
+            android:exported="false">
             <intent-filter>
-                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+                <action android:name="android.intent.action.DATE_CHANGED"/>
             </intent-filter>
-        </activity>
-
-        <!-- Activity alias for Android 14 and above -->
-        <activity-alias
-            android:name="ViewPermissionUsageActivity"
-            android:exported="true"
-            android:targetActivity=".PermissionsRationaleActivity"
-            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
-                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
-            </intent-filter>
-        </activity-alias>
+        </receiver>
     </application>
-
-    <queries>
-        <package android:name="com.google.android.apps.healthdata" />
-    </queries>
 
 </manifest>

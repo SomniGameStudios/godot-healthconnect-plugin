@@ -1,0 +1,106 @@
+[gd_scene load_steps=2 format=3 uid="uid://df2m0k6w8q0n1"]
+
+[ext_resource type="Script" path="res://main.gd" id="1_a2b3c"]
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_a2b3c")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 40
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 40
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Health Plugin Demo"
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="StatusLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Status: Waiting..."
+
+[node name="PermLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Permission: Unknown"
+
+[node name="HSeparator2" type="HSeparator" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="TodayStepsLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Today's Steps: -"
+
+[node name="TotalStepsLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Total Steps: -"
+
+[node name="LiveStepsLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Live/Pedometer Steps: -"
+
+[node name="HSeparator3" type="HSeparator" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="BtnRequestPerm" type="Button" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Request Permission"
+
+[node name="BtnStartObserver" type="Button" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Start Step Observer"
+
+[node name="BtnStopObserver" type="Button" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Stop Step Observer"
+
+[node name="BtnTodayQuery" type="Button" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Run Today Query"
+
+[node name="BtnTotalQuery" type="Button" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Run Total Query"
+
+[node name="BtnPeriodQuery" type="Button" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Run Period Query (7 Days)"
+
+[node name="HSeparator4" type="HSeparator" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="LogLabel" type="RichTextLabel" parent="MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+text = "Log output will appear here..."
+scroll_following = true
