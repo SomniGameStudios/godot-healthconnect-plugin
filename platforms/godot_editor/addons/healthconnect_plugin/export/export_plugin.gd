@@ -26,9 +26,8 @@ func _get_android_dependencies(platform: EditorExportPlatform, debug: bool) -> P
 		return PackedStringArray()
 
 	return PackedStringArray([
-		"androidx.health.connect:connect-client:1.1.0-alpha10",
 		"androidx.appcompat:appcompat:1.7.0",
-		])
+	])
 
 func _get_android_dependencies_maven_repos(platform: EditorExportPlatform, debug: bool) -> PackedStringArray:
 	return PackedStringArray(["https://maven.google.com/"])

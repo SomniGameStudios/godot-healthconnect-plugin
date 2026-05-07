@@ -17,8 +17,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
-HealthConnect="*res://addons/healthconnect_plugin/api/health_connect.gd"
-
+HealthConnect="*uid://cadxdm8ajphmp"
 
 [display]
 

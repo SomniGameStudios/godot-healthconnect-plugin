@@ -58,17 +58,30 @@ class StepSensorManager(
     override fun onSensorChanged(event: SensorEvent) {
         when (event.sensor.type) {
             Sensor.TYPE_STEP_DETECTOR -> {
-                plugin?.sendSignal("pedometer_steps_updated", liveSessionSteps + 1)
+                // Real-time optimistic update
+                liveSessionSteps++
+                plugin?.sendSignal("pedometer_steps_updated", liveSessionSteps)
                 plugin?.sendSignal("step_detected")
+                
+                // Optimistically increment the total counter for real-time UI feedback
+                val lastKnown = prefs.getInt("last_known_counter", -1)
+                if (lastKnown >= 0) {
+                    val optimisticTotal = lastKnown + 1
+                    prefs.edit().putInt("last_known_counter", optimisticTotal).apply()
+                    val todaySteps = computeTodaySteps(optimisticTotal)
+                    plugin?.sendSignal("steps_updated", todaySteps)
+                }
             }
             Sensor.TYPE_STEP_COUNTER -> {
                 val total = event.values[0].toInt()
+                prefs.edit().putInt("last_known_counter", total).apply()
+                
                 if (liveSessionBase < 0) liveSessionBase = total
                 liveSessionSteps = (total - liveSessionBase).coerceAtLeast(0)
                 plugin?.sendSignal("pedometer_steps_updated", liveSessionSteps)
                 plugin?.sendSignal("step_count_updated", liveSessionSteps)
 
-                // Keep steps_updated in sync with today's running total
+                // The absolute truth syncs with the UI here, correcting any optimistic drift
                 val todaySteps = computeTodaySteps(total)
                 plugin?.sendSignal("steps_updated", todaySteps)
             }
@@ -239,10 +252,19 @@ class StepSensorManager(
             override fun onAccuracyChanged(s: Sensor?, a: Int) {}
         }
         sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+        sensorManager.flush(listener)
         try { latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS) }
         finally { sensorManager.unregisterListener(listener) }
 
-        val total = captured ?: return null
-        return System.currentTimeMillis() to total
+        if (captured != null) {
+            prefs.edit().putInt("last_known_counter", captured!!).apply()
+            return System.currentTimeMillis() to captured!!
+        }
+        
+        val lastKnown = prefs.getInt("last_known_counter", -1)
+        if (lastKnown >= 0) {
+            return System.currentTimeMillis() to lastKnown
+        }
+        return null
     }
 }
