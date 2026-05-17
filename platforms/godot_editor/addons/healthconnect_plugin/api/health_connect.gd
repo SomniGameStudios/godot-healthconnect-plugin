@@ -42,8 +42,8 @@ func _ready() -> void:
 			_plugin.connect("pedometer_error", func(r): pedometer_error.emit(r))
 			_plugin.connect("step_detected", func(): step_detected.emit())
 			_plugin.connect("step_count_updated", func(c): step_count_updated.emit(c))
-			_plugin.connect("connected", func(): connected.emit())
-			_plugin.connect("disconnected", func(): disconnected.emit())
+			_plugin.connect("sensor_connected", func(): connected.emit())
+			_plugin.connect("sensor_disconnected", func(): disconnected.emit())
 			print("HealthConnect: Android plugin initialized")
 		else:
 			printerr("HealthConnect: HealthConnectPlugin singleton not found")

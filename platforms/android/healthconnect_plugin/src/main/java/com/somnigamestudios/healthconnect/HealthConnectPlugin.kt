@@ -44,8 +44,8 @@ class HealthConnectPlugin(godot: Godot) : GodotPlugin(godot) {
         // Low-level sensor signals (kept for compatibility)
         SignalInfo("step_detected"),
         SignalInfo("step_count_updated", Integer::class.java),
-        SignalInfo("connected"),
-        SignalInfo("disconnected"),
+        SignalInfo("sensor_connected"),
+        SignalInfo("sensor_disconnected"),
     )
 
     override fun onMainCreate(activity: Activity?): View? {
