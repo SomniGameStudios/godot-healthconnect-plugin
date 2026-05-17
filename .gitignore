@@ -4,6 +4,7 @@ bin/
 *.a
 *.aar
 *.jar
+!gradle-wrapper.jar
 *.apk
 
 # Android/Gradle
