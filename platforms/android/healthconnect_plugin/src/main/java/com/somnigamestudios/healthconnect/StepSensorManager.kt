@@ -44,12 +44,12 @@ class StepSensorManager(
         stepCounter?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL, 0)
         }
-        plugin?.sendSignal("connected")
+        plugin?.sendSignal("sensor_connected")
     }
 
     fun stopListening() {
         sensorManager.unregisterListener(this)
-        plugin?.sendSignal("disconnected")
+        plugin?.sendSignal("sensor_disconnected")
     }
 
     // Returns steps counted since startListening() was last called
