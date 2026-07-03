@@ -190,6 +190,9 @@ class HealthConnectPlugin(godot: Godot) : GodotPlugin(godot) {
     @UsedByGodot
     fun isActivityPermissionGranted(): Boolean = permissionsManager.isActivityRecognitionGranted()
 
+    @UsedByGodot
+    fun getActivityPermissionStatus(): Int = permissionsManager.getActivityRecognitionStatus()
+
     // ---- Internal signal bridge (called by StepSensorManager) ----
 
     fun sendSignal(name: String) = emitSignal(name)
